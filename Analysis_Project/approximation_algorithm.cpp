@@ -76,17 +76,81 @@ int calculate_total_unoccupied_time(int T, int L, const vector<vector<int>>& dur
     int total_unoccupied = 0;
     for (int i = 0; i < inspection_times.size(); ++i) {
         int inspect_time = inspection_times[i];
-        cout << "inspection " << i<<", ";
+        //cout << "inspection " << i<<", ";
         for (int l = 0; l < L; ++l) {
             if ((int)durations[l].size() > i) {
-                cout << "lab " << l << " :";
+                //cout << "lab " << l << " :";
                 int finish_time = compute_finish_time(durations[l], i+1);
-                cout << "finish time: " << finish_time<<endl;
+                //cout << "finish time: " << finish_time<<endl;
                 total_unoccupied += inspect_time - finish_time;
             }
         }
     }
     return total_unoccupied;
+}
+
+//----------------------optimal solution----------------------------------
+int calculate_total_unoccupied_time_brute(const vector<vector<int>>& durations, const vector<int>& inspection_times) {
+    int L = durations.size();
+    int total_unoccupied = 0;
+    for (int i = 0; i < inspection_times.size(); ++i) {
+        int inspect_time = inspection_times[i];
+        for (int l = 0; l < L; ++l) {
+            if ((int)durations[l].size() > i) {
+                int finish_time = compute_finish_time(durations[l], i + 1);
+                total_unoccupied += max(0, inspect_time - finish_time);
+            }
+        }
+    }
+    return total_unoccupied;
+}
+
+vector<int> generate_next_combination(vector<int> current, int T) {
+    int n = current.size();
+    for (int i = n - 1; i >= 0; --i) {
+        if (current[i] < T - (n - 1 - i)) {
+            ++current[i];
+            for (int j = i + 1; j < n; ++j) {
+                current[j] = current[j - 1] + 1;
+            }
+            return current;
+        }
+    }
+    return {};
+}
+
+vector<int> optimal_brute_force(const vector<vector<int>>& durations, int L, int C, int T) {
+    vector<int> best_schedule;
+    int min_unoccupied = numeric_limits<int>::max();
+    vector<int> current(C);
+    for (int i = 0; i < C; ++i) current[i] = i + 1;  // Start from 1 instead of 0 to avoid meaningless early inspections
+
+    while (!current.empty() && current.back() < T) {
+        int unoccupied = calculate_total_unoccupied_time_brute(durations, current);
+        if (unoccupied < min_unoccupied) {
+            min_unoccupied = unoccupied;
+            best_schedule = current;
+        }
+        current = generate_next_combination(current, T);
+    }
+
+   // cout << "\nOptimal system (inspection times): ";
+    for (int t : best_schedule) cout << t << " ";
+    //cout << "\nTotal optimal unoccupied time: " << min_unoccupied << "\n";
+
+    return best_schedule;
+}
+
+//--------------------------generate instances-------------------------
+vector<vector<int>> generate_random_instance(int L, int max_students, int max_duration) {
+    vector<vector<int>> durations(L);
+    for (int i = 0; i < L; ++i) {
+        int num_students = rand() % max_students + 1;
+        for (int j = 0; j < num_students; ++j) {
+            durations[i].push_back(rand() % max_duration + 1);
+        }
+    }
+    return durations;
 }
 
 int main() {
@@ -109,6 +173,10 @@ int main() {
     cout << "\n";
 
     cout << "Total unoccupied time: " << total_unoccupied_time << "\n";
+    optimal_brute_force(durations, L, C, T);
 
-    return 0;
+
+   
+
+    
 }
