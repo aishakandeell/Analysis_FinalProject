@@ -116,54 +116,57 @@ vector<int> generate_next_combination(vector<int> current, int T) {
     return {};
 }
 
-vector<int> optimal_brute_force(const vector<vector<int>>& durations, int L, int C, int T) {
+vector<int> optimal_brute_force(
+    const vector<vector<int>>& durations,
+    int L,               // number of labs
+    int C,               // number of inspections
+    int T                // time horizon
+) {
+    // 1) collect every finish‐time event
+    vector<int> events;
+    for (int l = 0; l < L; ++l) {
+        for (int k = 1; k <= (int)durations[l].size(); ++k) {
+            int ft = compute_finish_time(durations[l], k);
+            if (ft <= T) events.push_back(ft);
+        }
+    }
+    sort(events.begin(), events.end());
+    events.erase(unique(events.begin(), events.end()), events.end());
+    int N = events.size();
+    if (N < C) return {};  // not enough distinct events to schedule C inspections
+
+    // 2) set up initial combination of indices [0,1,2,...,C-1]
+    vector<int> idx(C);
+    iota(idx.begin(), idx.end(), 0);
+
     vector<int> best_schedule;
-    int min_unoccupied = numeric_limits<int>::max();
-    bool found = false;
+    int best_idle = numeric_limits<int>::max();
 
-    cout << "Starting brute-force search (C=" << C << ", T=" << T << ")...\n";
-    auto start = high_resolution_clock::now();
-
-    vector<int> current(C);
-    iota(current.begin(), current.end(), 1);
-
-    while (!current.empty()) {
-        // Check time limit every 1000 iterations
-
-        bool valid = true;
-        for (int i = 0; i < C && valid; ++i) {
-            if (current[i] > T) {
-                valid = false;
-                break;
-            }
-            for (int l = 0; l < L; ++l) {
-                if ((int)durations[l].size() > i) {
-                    int finish_time = compute_finish_time(durations[l], i+1);
-                    if (current[i] < finish_time) {
-                        valid = false;
-                        break;
-                    }
-                }
-            }
+    // 3) iterate over all C-combinations of the N events
+    while (true) {
+        // build the candidate inspection times
+        vector<int> cand(C);
+        for (int i = 0; i < C; ++i) {
+            cand[i] = events[idx[i]];
+        }
+        // evaluate
+        int idle = calculate_total_unoccupied_time(durations, cand);
+        if (idle < best_idle) {
+            best_idle = idle;
+            best_schedule = cand;
         }
 
-        if (valid) {
-            found = true;
-            int unoccupied = calculate_total_unoccupied_time(durations, current);
-            if (unoccupied < min_unoccupied) {
-                min_unoccupied = unoccupied;
-                best_schedule = current;
-            }
+        // advance to next combination
+        int i = C - 1;
+        while (i >= 0 && idx[i] == N - C + i) --i;
+        if (i < 0) break;                // we have exhausted all combinations
+        ++idx[i];
+        for (int j = i + 1; j < C; ++j) {
+            idx[j] = idx[j-1] + 1;
         }
-
-        current = generate_next_combination(current, T);
     }
 
-    auto end = high_resolution_clock::now();
-    auto duration = duration_cast<milliseconds>(end - start);
-    cout << "Brute-force completed in " << duration.count() << "ms\n";
-
-    return found ? best_schedule : vector<int>();
+    return best_schedule;
 }
 
 vector<vector<int>> generate_random_instance(int L, int max_students, int max_duration) {
