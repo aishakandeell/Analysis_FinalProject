@@ -1,0 +1,294 @@
+#include <iostream>
+#include <vector>
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <set>
+#include <numeric>
+#include <cstdlib>
+#include <ctime>
+#include <chrono>
+#include <fstream>
+
+
+using namespace std;
+using namespace std::chrono;
+
+// Forward declarations
+int compute_finish_time(const vector<int>& durations, int k);
+vector<int> schedule_inspections(const vector<vector<int>>& durations, int L, int C, int T);
+int calculate_total_unoccupied_time(const vector<vector<int>>& durations, const vector<int>& inspection_times);
+vector<int> generate_next_combination(vector<int> current, int T);
+vector<int> optimal_brute_force(const vector<vector<int>>& durations, int L, int C, int T);
+vector<vector<int>> generate_random_instance(int L, int max_students, int max_duration);
+
+int compute_finish_time(const vector<int>& durations, int k) {
+    return accumulate(durations.begin(), durations.begin() + min(k, (int)durations.size()), 0);
+}
+
+vector<int> schedule_inspections(const vector<vector<int>>& durations, int L, int C, int T) {
+    vector<int> inspection_times;
+    set<int> used_times;
+
+    if (C == 1) {
+        int max_finish = 0;
+        for (int l = 0; l < L; ++l) {
+            if (!durations[l].empty()) {
+                max_finish = max(max_finish, durations[l][0]);
+            }
+        }
+        if (max_finish <= T) inspection_times.push_back(max_finish);
+        return inspection_times;
+    }
+
+    int max_students = 0;
+    for (const auto& lab : durations) {
+        max_students = max(max_students, (int)lab.size());
+    }
+
+    double standard_interval = static_cast<double>(T) / (C + 1);
+
+    for (int i = 1; i <= C; ++i) {
+        double target_time = i * standard_interval;
+        vector<int> candidate_times;
+
+        for (int l = 0; l < L; ++l) {
+            if ((int)durations[l].size() >= i) {
+                int finish_time = compute_finish_time(durations[l], i);
+                candidate_times.push_back(finish_time);
+            }
+        }
+
+        // Remove duplicates
+        candidate_times.erase(remove_if(candidate_times.begin(), candidate_times.end(),
+            [&](int t) { return used_times.count(t); }), candidate_times.end());
+
+        // Select the closest candidate to target_time
+        int chosen_time;
+        if (!candidate_times.empty()) {
+            chosen_time = candidate_times[0];
+            int min_diff = abs(candidate_times[0] - target_time);
+            for (int t : candidate_times) {
+                int diff = abs(t - target_time);
+                if (diff < min_diff || (diff == min_diff && t < chosen_time)) {
+                    min_diff = diff;
+                    chosen_time = t;
+                }
+            }
+        }
+        else {
+            chosen_time = static_cast<int>(round(target_time));
+        }
+
+        inspection_times.push_back(chosen_time);
+        used_times.insert(chosen_time);
+    }
+    return inspection_times;
+}
+
+
+int calculate_total_unoccupied_time(const vector<vector<int>>& durations, const vector<int>& inspection_times) {
+    int total_unoccupied = 0;
+    int L = durations.size();
+    int C = inspection_times.size();
+    
+    for (int i = 0; i < C; ++i) {
+        int inspect_time = inspection_times[i];
+        for (int l = 0; l < L; ++l) {
+            if ((int)durations[l].size() > i) {
+                int finish_time = compute_finish_time(durations[l], i + 1);
+                total_unoccupied += max(0, inspect_time - finish_time);
+            }
+        }
+    }
+    return total_unoccupied;
+}
+
+vector<int> generate_next_combination(vector<int> current, int T) {
+    int n = current.size();
+    for (int i = n - 1; i >= 0; --i) {
+        if (current[i] < T - (n - 1 - i)) {
+            ++current[i];
+            for (int j = i + 1; j < n; ++j) {
+                current[j] = current[j - 1] + 1;
+            }
+            return current;
+        }
+    }
+    return {};
+}
+
+vector<int> optimal_brute_force(
+    const vector<vector<int>>& durations,
+    int L,
+    int C,
+    int T
+) {
+    // 1. Collect valid finish times
+    set<int> unique_times;
+    for (int l = 0; l < L; ++l) {
+        for (int k = 1; k <= durations[l].size(); ++k) {
+            int finish_time = compute_finish_time(durations[l], k);
+            if (finish_time <= T) {
+                unique_times.insert(finish_time);
+            }
+        }
+    }
+
+    vector<int> events(unique_times.begin(), unique_times.end());
+    int N = events.size();
+    if (N < C) return {}; // not enough options to pick from
+
+    vector<int> best_schedule;
+    int best_idle = numeric_limits<int>::max();
+
+    // 2. Generate all C-combinations of the N events
+    vector<int> indices(C);
+    iota(indices.begin(), indices.end(), 0);
+
+    while (true) {
+        // Create current candidate schedule
+        vector<int> candidate(C);
+        for (int i = 0; i < C; ++i)
+            candidate[i] = events[indices[i]];
+
+        // Check feasibility: each inspection must be >= all lab's (i+1)-student finish time
+        bool feasible = true;
+        for (int i = 0; i < C && feasible; ++i) {
+            for (int l = 0; l < L; ++l) {
+                if ((int)durations[l].size() > i) {
+                    int required_time = compute_finish_time(durations[l], i + 1);
+                    if (candidate[i] < required_time) {
+                        feasible = false;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (feasible) {
+            int idle = calculate_total_unoccupied_time(durations, candidate);
+            if (idle < best_idle) {
+                best_idle = idle;
+                best_schedule = candidate;
+            }
+        }
+
+        // Generate next combination
+        int i = C - 1;
+        while (i >= 0 && indices[i] == N - C + i) --i;
+        if (i < 0) break;
+        ++indices[i];
+        for (int j = i + 1; j < C; ++j)
+            indices[j] = indices[j - 1] + 1;
+    }
+
+    return best_schedule;
+}
+
+
+
+vector<vector<int>> generate_random_instance(int L, int max_students, int max_duration) {
+    vector<vector<int>> durations(L);
+    for (int i = 0; i < L; ++i) {
+        int num_students = rand() % max_students + 1;
+        for (int j = 0; j < num_students; ++j) {
+            durations[i].push_back(rand() % max_duration + 1);
+        }
+        sort(durations[i].begin(), durations[i].end());
+    }
+    return durations;
+}
+
+int main() {
+    const int L = 3;        // Number of labs
+    const int C = 2;        // Number of inspections
+    const int D = 1;        // Days (for time horizon)
+    const int T = D * 24;   // Total available time
+
+    srand(static_cast<unsigned>(time(nullptr)));
+
+    // Prepare CSV
+    ofstream csv("brute_force_runtime.csv");
+    csv << "Instance,N,C,Combinations,Runtime(us)\n";
+    ofstream heuristic_csv("approx_runtime.csv");
+    heuristic_csv << "Instance,C,Runtime(us)\n";
+
+    const int num_instances = 20; // Try 20 different instances
+    for (int instance_id = 1; instance_id <= num_instances; ++instance_id) {
+        
+
+        int max_students = rand() % 10 + 1;
+        int max_duration = rand() % 24 + 1;
+
+        auto durations = generate_random_instance(L, max_students, max_duration);
+
+        // Heuristic solution
+        auto start_heuristic = high_resolution_clock::now();
+        auto heuristic_times = schedule_inspections(durations, L, C, T);
+        int heuristic_idle = calculate_total_unoccupied_time(durations, heuristic_times);
+        auto end_heuristic = high_resolution_clock::now();
+        
+        long long heuristic_runtime = duration_cast<microseconds>(end_heuristic - start_heuristic).count();
+        heuristic_csv << instance_id << "," << C << "," << heuristic_runtime << "\n";
+
+
+        // Brute-force solution (event collection)
+        auto events = vector<int>();
+        for (int l = 0; l < L; ++l) {
+            for (int k = 1; k <= (int)durations[l].size(); ++k) {
+                int ft = compute_finish_time(durations[l], k);
+                if (ft <= T) events.push_back(ft);
+            }
+        }
+        sort(events.begin(), events.end());
+        events.erase(unique(events.begin(), events.end()), events.end());
+
+        int N = events.size();
+
+        auto binomial = [](int n, int k) -> long long {
+            if (k > n) return 0;
+            long long res = 1;
+            for (int i = 1; i <= k; ++i) {
+                res *= (n - i + 1);
+                res /= i;
+            }
+            return res;
+            };
+        long long combinations = binomial(N, C);
+
+        // Time brute-force
+        auto start_opt = high_resolution_clock::now();
+        auto optimal_times = optimal_brute_force(durations, L, C, T);
+        auto end_opt = high_resolution_clock::now();
+        long long runtime_us = duration_cast<microseconds>(end_opt - start_opt).count();
+
+        if (!optimal_times.empty()) {
+            int optimal_idle = calculate_total_unoccupied_time(durations, optimal_times);
+            cout << "\nInstance " << instance_id << "\n";
+            cout << "Optimal solution:\nTimes: ";
+            for (int t : optimal_times) cout << t << " ";
+            cout << "\nIdle time: " << optimal_idle << "\n";
+
+            cout << "\nComparison:\n";
+            cout << "Heuristic idle: " << heuristic_idle << "\n";
+            cout << "Optimal idle: " << optimal_idle << "\n";
+            cout << "Difference: " << (heuristic_idle - optimal_idle)
+                << " (" << 100.0 * (heuristic_idle - optimal_idle) / optimal_idle << "% worse)\n";
+
+            // Write to CSV
+            csv << instance_id << "," << N << "," << C << "," << combinations << "," << runtime_us << "\n";
+        }
+        else {
+            cout << "\nInstance " << instance_id << ": No valid optimal schedule found.\n";
+        }
+    }
+
+    csv.close();
+    heuristic_csv.close();
+
+    cout << "\nFinished running " << num_instances << " instances.\n";
+    return 0;
+}
+
+
