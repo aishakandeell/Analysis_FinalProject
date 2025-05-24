@@ -200,6 +200,85 @@ vector<vector<int>> generate_random_instance(int L, int max_students, int max_du
     return durations;
 }
 
+vector<int> optimal_dp_2labs(const vector<vector<int>>& D2, int C, int T) {
+    // precompute finish[l][k]
+    vector<vector<int>> finish(2);
+    for (int l = 0; l < 2; ++l) {
+        int M = D2[l].size();
+        finish[l].assign(M+1, 0);
+        for (int k = 1; k <= M; ++k)
+            finish[l][k] = finish[l][k-1] + D2[l][k-1];
+    }
+
+    // collect all finish‐time events ≤ T
+    vector<int> events;
+    for (int l = 0; l < 2; ++l)
+      for (int k = 1; k < (int)finish[l].size(); ++k)
+        if (finish[l][k] <= T)
+          events.push_back(finish[l][k]);
+
+    sort(events.begin(), events.end());
+    events.erase(unique(events.begin(), events.end()), events.end());
+    int N = events.size();
+
+    // if not enough distinct events, fallback to evenly spaced
+    if (N < C) {
+      vector<int> fb;
+      for (int i = 1; i <= C; ++i)
+        fb.push_back(i * T / (C+1));
+      return fb;
+    }
+
+    const int INF = numeric_limits<int>::max() / 2;
+    vector<vector<int>> dp(C+1, vector<int>(N+1, INF));
+    vector<vector<bool>> take(C+1, vector<bool>(N+1, false));
+
+    // base case
+    for (int e = 0; e <= N; ++e)
+      dp[0][e] = 0;
+
+    // fill DP
+    for (int c = 1; c <= C; ++c) {
+      for (int e = 1; e <= N; ++e) {
+        // skip event e-1
+        dp[c][e] = dp[c][e-1];
+
+        // take event e-1 as the cth inspection
+        int t = events[e-1];
+        int req = max(finish[0][c], finish[1][c]);
+        if (t >= req) {
+          int idle = (t - finish[0][c]) + (t - finish[1][c]);
+          int cand = dp[c-1][e-1] + idle;
+          if (cand < dp[c][e]) {
+            dp[c][e] = cand;
+            take[c][e] = true;
+          }
+        }
+      }
+    }
+
+    // backtrack
+    vector<int> sol;
+    int c = C, e = N;
+    while (c > 0) {
+      if (take[c][e]) {
+        sol.push_back(events[e-1]);
+        --c; --e;
+      } else {
+        --e;
+      }
+    }
+    reverse(sol.begin(), sol.end());
+
+    // if somehow empty, fallback
+    if (sol.size() != (size_t)C) {
+      sol.clear();
+      for (int i = 1; i <= C; ++i)
+        sol.push_back(i * T / (C+1));
+    }
+    return sol;
+}
+
 int main() {
     const int L = 3;        // Number of labs
     const int C = 2;        // Number of inspections
@@ -277,7 +356,18 @@ int main() {
                 << " (" << 100.0 * (heuristic_idle - optimal_idle) / optimal_idle << "% worse)\n";
 
             // Write to CSV
-            csv << instance_id << "," << N << "," << C << "," << combinations << "," << runtime_us << "\n";
+         
+       csv << instance_id << "," << N << "," << C << "," << combinations << "," << runtime_us << "\n";
+       // -- DP solution on the first two labs --
+vector<vector<int>> two = { durations[0], durations[1] };
+vector<int> dp_times = optimal_dp_2labs(two, C, T);
+int dp_idle = calculate_total_unoccupied_time(two, dp_times);
+
+cout << "\nDP-2labs solution:\n";
+cout << " Times: ";
+for (int t : dp_times) cout << t << " ";
+cout << "\n Idle time: " << dp_idle << "\n";
+
         }
         else {
             cout << "\nInstance " << instance_id << ": No valid optimal schedule found.\n";
@@ -288,6 +378,8 @@ int main() {
     heuristic_csv.close();
 
     cout << "\nFinished running " << num_instances << " instances.\n";
+
+   
     return 0;
 }
 
